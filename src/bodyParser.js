@@ -11,7 +11,7 @@ function bodyParser(req, res, next) {
             }
             req.fields = fields;
             req.files = files;
-            next(); 
+            next();
         });
     } 
     else {
@@ -19,7 +19,6 @@ function bodyParser(req, res, next) {
         req.on('data', chunk => {
             body += chunk.toString();
         });
-        
         req.on('end', () => {
             try {
                 req.body = body ? JSON.parse(body) : {};

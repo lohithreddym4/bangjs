@@ -1,8 +1,16 @@
 {
     "name": "bangjs-light",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "description": "BangJs is a lightweight, yet powerful, Node.js framework designed for building scalable web applications with ease. It simplifies server-side development by offering a structured routing system, flexible middleware support, and robust error handling. BangJs allows developers to effortlessly handle complex request parsing, validation, and file uploads, making it ideal for building modern APIs and microservices. With a focus on developer experience, it includes features like route normalization, schema validation, and customizable middleware stacks, providing the perfect balance between simplicity and flexibility.",
     "main": "index.js",
+    "keywords": [
+        "bangjs",
+        "nodejs",
+        "framework",
+        "web",
+        "api",
+        "microservices"
+    ],
     "scripts": {
         "start": "node index.js"
     },
