@@ -1,89 +1,220 @@
-class Router {
-    constructor() {
-        this.routes = {};
-        this.middlewares = [];
+"use strict";
+
+
+const METHODS = Object.freeze({
+    GET: 1,
+    POST: 2,
+    PUT: 4,
+    DELETE: 8,
+    PATCH: 16,
+    OPTIONS: 32,
+    HEAD: 64
+});
+
+const BIT_INDEX =
+    Object.freeze({
+        1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6
+    });
+
+
+
+class Node {
+
+    constructor(segment) {
+
+        this.segment = segment;
+
+        // flat children array → cache friendly
+        this.children = [];
+
+        this.paramChild = null;
+        this.paramName = null;
+
+        this.wildcardChild = null;
+
+        this.methods = 0;
+
+        this.handlers = [
+            null, null, null, null,
+            null, null, null, null
+        ];
+        this.first = segment ? segment.charCodeAt(0) : 0;
+
     }
 
-    // Add a middleware to the router
-    use(middleware) {
-        this.middlewares.push(middleware);
-    }
-    // Register routes for various HTTP methods
-    get(path, handler, schema = null, middlewares = []) {
-        this.register('GET', path, handler, schema, middlewares);
-    }
 
-    post(path, handler, schema = null, middlewares = []) {
-        this.register('POST', path, handler, schema, middlewares);
-    }
+    // tiny scan beats hashing in real CPUs
+    findChild(url, start, len) {
 
-    put(path, handler, schema = null, middlewares = []) {
-        this.register('PUT', path, handler, schema, middlewares);
-    }
+        const kids = this.children;
 
-    delete(path, handler, schema = null, middlewares = []) {
-        this.register('DELETE', path, handler, schema, middlewares);
-    }
+        for (let i = 0; i < kids.length; i++) {
 
-    patch(path, handler, schema = null, middlewares = []) {
-        this.register('PATCH', path, handler, schema, middlewares);
-    }
+            const child = kids[i];
+            const seg = child.segment;
 
-    options(path, handler, schema = null, middlewares = []) {
-        this.register('OPTIONS', path, handler, schema, middlewares);
-    }
-
-    // Internal method to register routes
-    register(method, path, handler, schema = null, middlewares = []) {
-        path = this.normalizePath(path);
-
-        if (!this.routes[method]) {
-            this.routes[method] = [];
-        }
-
-        // Save handler, schema, and middlewares for the route
-        this.routes[method].push({ path, handler, schema, middlewares });
-    }
-
-    // Match the route based on the method and URL
-    async match(method, url) {
-        if (!this.routes[method]) return null;
-        url = this.normalizePath(url);
-        for (const route of this.routes[method]) {
-            const { path, handler, schema, middlewares } = route;
-            const pathRegex = this.pathToRegex(path);
-            const match = url.match(pathRegex);
-
-            if (match) {
-                const params = this.extractParams(path, url);
-                return { handler, schema, params, middlewares };
+            if (
+                child.first === url.charCodeAt(start) &&
+                seg.length === len &&
+                url.startsWith(seg, start)
+            ) {
+                return child;
             }
         }
 
-        return null; // Return null if no route is matched (404)
-    }
-
-    // Convert path with parameters to a regex pattern
-    pathToRegex(path) {
-        const regexPath = path.replace(/:\w+/g, '([^/]+)');
-        return new RegExp(`^${regexPath}$`);
-    }
-
-    // Extract route parameters from URL
-    extractParams(path, url) {
-        const paramNames = (path.match(/:\w+/g) || []).map(param => param.slice(1));
-        const paramValues = url.match(this.pathToRegex(path)).slice(1);
-
-        return paramNames.reduce((params, name, index) => {
-            params[name] = paramValues[index];
-            return params;
-        }, {});
-    }
-
-    // Normalize path by removing trailing slash
-    normalizePath(path) {
-        return path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
+        return null;
     }
 }
 
-module.exports = { Router };
+
+
+class BangRouter {
+
+    constructor() {
+        this.root = new Node("");
+    }
+
+
+    register(method, path, handler) {
+
+        const bit = METHODS[method];
+        if (!bit) throw Error("Unsupported method");
+
+        if (path.charCodeAt(0) !== 47) {
+            throw Error("Path must start with /");
+        }
+
+        let node = this.root;
+
+        let i = 1;
+        let start = 1;
+
+        while (i <= path.length) {
+
+            if (i === path.length || path.charCodeAt(i) === 47) {
+
+                const segment = path.slice(start, i);
+
+                // PARAM
+                if (segment.charCodeAt(0) === 58) {
+
+                    if (!node.paramChild) {
+                        const child = new Node("");
+                        child.paramName = segment.slice(1);
+                        node.paramChild = child;
+                    }
+
+                    node = node.paramChild;
+                }
+
+                // WILDCARD
+                else if (segment === "*") {
+
+                    if (i !== path.length) {
+                        throw Error("Wildcard must be last");
+                    }
+
+                    if (!node.wildcardChild) {
+                        node.wildcardChild = new Node("*");
+                    }
+
+                    node = node.wildcardChild;
+                    break;
+                }
+
+                // STATIC
+                else {
+
+                    let child = null;
+                    const kids = node.children;
+
+                    for (let k = 0; k < kids.length; k++) {
+                        if (kids[k].segment === segment) {
+                            child = kids[k];
+                            break;
+                        }
+                    }
+
+                    if (!child) {
+                        child = new Node(segment);
+                        kids.push(child);
+                    }
+
+                    node = child;
+                }
+
+                start = i + 1;
+            }
+
+            i++;
+        }
+
+
+        // duplicate guard
+        if (node.methods & bit) {
+            throw Error("Duplicate route");
+        }
+
+        node.methods |= bit;
+        node.handlers[BIT_INDEX[bit]] = handler;
+    }
+
+
+    match(method, url, params) {
+
+        const bit = METHODS[method];
+        if (!bit) return null;
+
+        let node = this.root;
+
+        let i = 1;
+        let start = 1;
+
+        while (i <= url.length) {
+
+            if (i === url.length || url.charCodeAt(i) === 47) {
+
+                const len = i - start;
+
+                // STATIC FIRST
+                let next = node.findChild(url, start, len);
+
+                if (next) {
+                    node = next;
+                }
+
+                // PARAM
+                else if (node.paramChild) {
+
+                    if (params !== null) {
+                        params[node.paramChild.paramName] =
+                            url.slice(start, i);
+                    }
+                    node = node.paramChild;
+                }
+
+                // WILDCARD
+                else if (node.wildcardChild) {
+
+                    params["*"] = url.slice(start);
+                    node = node.wildcardChild;
+                    break;
+                }
+
+                else {
+                    return null;
+                }
+
+                start = i + 1;
+            }
+
+            i++;
+        }
+
+        if (!(node.methods & bit)) return null;
+
+        return node.handlers[BIT_INDEX[bit]];
+    }
+}
+
+module.exports = BangRouter;
